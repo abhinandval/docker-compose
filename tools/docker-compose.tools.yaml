@@ -1,0 +1,18 @@
+name: 'tools'
+
+version: "3"
+
+services:
+  Nextcloud:
+    image: lscr.io/linuxserver/nextcloud:latest
+    container_name: nextcloud
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - .appdata/nextcloud:/config
+      - ./media-drive/storage/media/nextcloud:/data
+    ports:
+      - 8343:443
+    restart: unless-stopped

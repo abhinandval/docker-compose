@@ -1,0 +1,15 @@
+name: pro-tools
+services:
+  cloudflared:
+    container_name: cf-tunnel-prof-tools
+    image: cloudflare/cloudflared:latest  
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN_PROF-TOOLS}
+    env_file: stack.env
+  Appsmith:
+    image: index.docker.io/appsmith/appsmith-ce
+    container_name: appsmith
+    ports:
+      - "3133:80"
+    volumes:
+      - ./appdata/appsmith:/appsmith-stacks
+    restart: unless-stopped

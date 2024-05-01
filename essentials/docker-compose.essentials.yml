@@ -1,0 +1,31 @@
+name: essentials
+
+services:
+  cloudflared:
+    container_name: cf-tunnel-essentials
+    image: cloudflare/cloudflared:latest  
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN_ESSENTIALS}
+  Portainer:
+    container_name: portainer
+    image: portainer/portainer-ce:latest
+    restart: always
+    volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+        - ./appdata/portainer/:/data
+    ports:
+        - 9000:9000
+        - 8000:8000
+        - 9443:9443
+  Duplicati:
+    image: lscr.io/linuxserver/duplicati:latest
+    container_name: duplicati
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./appdata/duplicati:/config
+      - /home/abhinandv/:/source
+    restart: unless-stopped
+    ports:
+      - 8200:8200

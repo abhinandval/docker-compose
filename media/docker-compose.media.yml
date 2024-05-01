@@ -1,0 +1,193 @@
+name: home-media-server
+
+networks:
+  media-network:
+    ipam:
+      config:
+        - subnet: 172.10.0.0/24
+        
+volumes:
+  storage:
+    driver: rclone
+    driver_opts:
+      remote: 'personal_gdrive:storage'
+      allow_other: 'true'
+      vfs_cache_mode: full
+      poll_interval: 0
+      uid: 1000
+      gid: 1000
+      umask: 022
+
+services:
+  # Wireguard Peer
+  WGClientNode:
+    image: ghcr.io/digitallyrefined/docker-wireguard-tunnel:v3
+    container_name: wg-peer1
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      # Note that DOMAIN & PEERS are not required for the peer
+      # Services to expose format (comma-separated)
+      # SERVICES=peer-id:peer-container-name:peer-container-port:expose-port-as
+      - SERVICES=peer1:jellyfin:8096:8096,peer1:homarr:7575:7575,peer1:gluetun:7878:7878,peer1:gluetun:8989:8989,peer1:gluetun:5055:5055
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./appdata/wg_peer1:/etc/wireguard
+    restart: unless-stopped
+    links:
+      - Jellyfin:jellyfin
+      - Homarr:homarr
+      - gluetun:gluetun
+    networks:
+      media-network:
+  # Jellyfin
+  Jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./appdata/jellyfin:/config
+      - ./media-drive/storage/media:/media
+    ports:
+      - 8096:8096
+    group_add:
+      - "109"
+    networks:
+      media-network:
+        ipv4_address: 172.10.0.3
+  Homarr:
+    container_name: homarr
+    image: ghcr.io/ajnart/homarr:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Optional, only if you want docker integration
+      - ./appdata/homarr/configs:/app/data/configs
+      - ./appdata/homarr/icons:/app/public/icons
+      - ./appdata/homarr/data:/data
+    ports:
+      - '7575:7575'
+    networks:
+      media-network:
+        ipv4_address: 172.10.0.4
+  #VPN
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./appdata/gluetun:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+      - VPN_ENDPOINT_IP=${VPN_ENDPOINT_IP}
+      - VPN_ENDPOINT_PORT=${VPN_ENDPOINT_PORT}
+      - WIREGUARD_PUBLIC_KEY=${WIREGUARD_PUBLIC_KEY}
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+    networks:
+      media-network:
+    ports:
+      # Jellyser
+      - 5055:5055
+      # Sonarr
+      - 8989:8989
+      # Radarr
+      - 7878:7878
+      # Flaresolver
+      - 8191:8191
+      # Prowlarr
+      - 9696:9696
+      # Qbit
+      - 8091:8091
+      - 6881:6881
+      - 6881:6881/udp
+  Jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    environment:
+        - LOG_LEVEL=debug
+        - TZ=Asia/Kolkata
+    volumes:
+      - ./appdata/jellyseerr:/app/config
+    restart: unless-stopped
+    depends_on:
+      - Sonarr
+      - Radarr
+    network_mode: "service:gluetun"
+  Sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./appdata/sonarr:/config
+      - ./media-drive/storage:/storage
+    depends_on:
+      - Prowlarr
+    network_mode: "service:gluetun"
+  Radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./appdata/radarr:/config
+      - ./media-drive/storage:/storage
+    depends_on:
+      - Prowlarr
+    network_mode: "service:gluetun"
+  Prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./appdata/prowlarr:/config
+    network_mode: "service:gluetun"
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_HTML=${LOG_HTML:-false}
+      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-none}
+      - TZ=Asia/Kolkata
+    restart: unless-stopped
+    network_mode: "service:gluetun"
+  # Torrent - Qbit
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - WEBUI_PORT=8091
+      - TORRENTING_PORT=6881
+    volumes:
+      - ./appdata/qbittorrent/:/config
+      - ./media-drive/storage/:/storage
+    network_mode: "service:gluetun"
+    restart: unless-stopped
