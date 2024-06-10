@@ -1,21 +1,33 @@
 name: essentials
 
+volumes:
+  duplicati:
+    driver: rclone
+    driver_opts:
+      remote: 'personal_gdrive:duplicati'
+      allow_other: 'true'
+      vfs_cache_mode: full
+      poll_interval: 0
+
 services:
+  # Cloudflared - For exporsing containers to internet
   cloudflared:
     container_name: cf-tunnel-essentials
     image: cloudflare/cloudflared:latest  
     command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN_ESSENTIALS}
+  # Portainer - Interface for managing containers
   Portainer:
     container_name: portainer
     image: portainer/portainer-ce:latest
     restart: always
     volumes:
         - /var/run/docker.sock:/var/run/docker.sock
-        - ./appdata/portainer/:/data
+        - ${APPDATA_PATH}/portainer/:/data
     ports:
         - 9000:9000
         - 8000:8000
         - 9443:9443
+  # Duplicati - Making backup of container data
   Duplicati:
     image: lscr.io/linuxserver/duplicati:latest
     container_name: duplicati
@@ -24,8 +36,19 @@ services:
       - PGID=1000
       - TZ=Asia/Kolkata
     volumes:
-      - ./appdata/duplicati:/config
-      - /home/abhinandv/:/source
+      - ${APPDATA_PATH}/duplicati:/config
+      - /home/${USERNAME}/:/source
+      - duplicati:/gdrive
     restart: unless-stopped
     ports:
       - 8200:8200
+  # WatchTower - auto updating containers
+  watchtower:
+    container_name: watchtower
+    image: containrrr/watchtower
+    environment:
+      - TZ=Asia/Kolkata
+      - WATCHTOWER_CLEANUP="true"
+      - WATCHTOWER_SCHEDULE=0 0 6 * * *
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
