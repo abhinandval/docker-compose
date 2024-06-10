@@ -5,18 +5,6 @@ networks:
     ipam:
       config:
         - subnet: 172.10.0.0/24
-        
-volumes:
-  storage:
-    driver: rclone
-    driver_opts:
-      remote: 'personal_gdrive:storage'
-      allow_other: 'true'
-      vfs_cache_mode: full
-      poll_interval: 0
-      uid: 1000
-      gid: 1000
-      umask: 022
 
 services:
   # Wireguard Peer
@@ -30,18 +18,33 @@ services:
       # Note that DOMAIN & PEERS are not required for the peer
       # Services to expose format (comma-separated)
       # SERVICES=peer-id:peer-container-name:peer-container-port:expose-port-as
-      - SERVICES=peer1:jellyfin:8096:8096,peer1:homarr:7575:7575,peer1:gluetun:7878:7878,peer1:gluetun:8989:8989,peer1:gluetun:5055:5055
+      - SERVICES=peer1:jellyfin:8096:8096,peer1:homarr:7575:7575,peer1:audiobookshelf:80:8196,peer1:kavita:5000:5112
     cap_add:
       - NET_ADMIN
     volumes:
-      - ./appdata/wg_peer1:/etc/wireguard
+      - ${APPDATA_PATH}/wg_peer1:/etc/wireguard
     restart: unless-stopped
     links:
       - Jellyfin:jellyfin
       - Homarr:homarr
-      - gluetun:gluetun
+      - Audiobookshelf:audiobookshelf
+      - Kavita:kavita
     networks:
       media-network:
+  Homarr:
+    container_name: homarr
+    image: ghcr.io/ajnart/homarr:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Optional, only if you want docker integration
+      - ${APPDATA_PATH}/homarr/configs:/app/data/configs
+      - ${APPDATA_PATH}/homarr/icons:/app/public/icons
+      - ${APPDATA_PATH}/homarr/data:/data
+    ports:
+      - '7575:7575'
+    networks:
+      media-network:
+        ipv4_address: 172.10.0.4
   # Jellyfin
   Jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
@@ -55,8 +58,8 @@ services:
       - UMASK=022
       - TZ=Asia/Kolkata
     volumes:
-      - ./appdata/jellyfin:/config
-      - ./media-drive/storage/media:/media
+      - ${APPDATA_PATH}/jellyfin:/config
+      - ${MEDIA_PATH}/storage/media:/media
     ports:
       - 8096:8096
     group_add:
@@ -64,20 +67,36 @@ services:
     networks:
       media-network:
         ipv4_address: 172.10.0.3
-  Homarr:
-    container_name: homarr
-    image: ghcr.io/ajnart/homarr:latest
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock # Optional, only if you want docker integration
-      - ./appdata/homarr/configs:/app/data/configs
-      - ./appdata/homarr/icons:/app/public/icons
-      - ./appdata/homarr/data:/data
+  Audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
     ports:
-      - '7575:7575'
+      - 13378:80
+    volumes:
+      - ${APPDATA_PATH}/audiobookshelf/config:/config
+      - ${APPDATA_PATH}/audiobookshelf/metadata>:/metadata
+      - ${MEDIA_PATH}/storage/media/books/audiobooks:/audiobooks
+    environment:
+      - TZ=Asia/Kolkata
     networks:
       media-network:
-        ipv4_address: 172.10.0.4
+        ipv4_address: 172.10.0.5
+  Kavita:
+    image: lscr.io/linuxserver/kavita:latest
+    container_name: kavita
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - ${APPDATA_PATH}/kavita:/config
+      - ${MEDIA_PATH}/storage:/storage
+    ports:
+      - 5112:5000
+    restart: unless-stopped
+    networks:
+      media-network:
+        ipv4_address: 172.10.0.6
   #VPN
   gluetun:
     image: qmcgaw/gluetun
@@ -85,7 +104,7 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
-      - ./appdata/gluetun:/gluetun
+      - ${APPDATA_PATH}/gluetun:/gluetun
     environment:
       - VPN_SERVICE_PROVIDER=custom
       - VPN_TYPE=wireguard
@@ -97,6 +116,16 @@ services:
     networks:
       media-network:
     ports:
+      # Lazylibrary
+      - 5299:5299
+      # Whisparr
+      - 6969:6969
+      # Readarr
+      - 8787:8787
+      # Lidarr
+      - 8686:8686
+      # Bazarr
+      - 6767:6767
       # Jellyser
       - 5055:5055
       # Sonarr
@@ -111,6 +140,30 @@ services:
       - 8091:8091
       - 6881:6881
       - 6881:6881/udp
+  readarr:
+    container_name: readarr
+    image: ghcr.io/hotio/readarr
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+      - TZ=Asia/Kolkata
+    volumes:
+      - ${APPDATA_PATH}/readarr:/config
+      - ${MEDIA_PATH}/storage:/storage
+  Bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - ${APPDATA_PATH}/bazarr:/config
+      - ${MEDIA_PATH}/storage:/storage
+    network_mode: "service:gluetun"
+    restart: unless-stopped
   Jellyseerr:
     image: fallenbagel/jellyseerr:latest
     container_name: jellyseerr
@@ -118,11 +171,38 @@ services:
         - LOG_LEVEL=debug
         - TZ=Asia/Kolkata
     volumes:
-      - ./appdata/jellyseerr:/app/config
+      - ${APPDATA_PATH}/jellyseerr:/app/config
     restart: unless-stopped
     depends_on:
       - Sonarr
       - Radarr
+    network_mode: "service:gluetun"
+  lazylibrarian:
+    image: lscr.io/linuxserver/lazylibrarian:latest
+    container_name: lazylibrarian
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - DOCKER_MODS=linuxserver/mods:universal-calibre|linuxserver/mods:lazylibrarian-ffmpeg #optional
+    volumes:
+      - ${APPDATA_PATH}/lazylibrarian:/config
+      - ${MEDIA_PATH}/storage:/storage
+    network_mode: "service:gluetun"
+    restart: unless-stopped
+  Lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    depends_on:
+      - Prowlarr
+    volumes:
+      - ${APPDATA_PATH}/lidarr:/config
+      - ${MEDIA_PATH}/storage:/storage
     network_mode: "service:gluetun"
   Sonarr:
     image: lscr.io/linuxserver/sonarr:latest
@@ -134,8 +214,8 @@ services:
       - UMASK=022
       - TZ=Asia/Kolkata
     volumes:
-      - ./appdata/sonarr:/config
-      - ./media-drive/storage:/storage
+      - ${APPDATA_PATH}/sonarr:/config
+      - ${MEDIA_PATH}/storage:/storage
     depends_on:
       - Prowlarr
     network_mode: "service:gluetun"
@@ -149,8 +229,8 @@ services:
       - UMASK=022
       - TZ=Asia/Kolkata
     volumes:
-      - ./appdata/radarr:/config
-      - ./media-drive/storage:/storage
+      - ${APPDATA_PATH}/radarr:/config
+      - ${MEDIA_PATH}/storage:/storage
     depends_on:
       - Prowlarr
     network_mode: "service:gluetun"
@@ -164,7 +244,7 @@ services:
       - UMASK=022
       - TZ=Asia/Kolkata
     volumes:
-      - ./appdata/prowlarr:/config
+      - ${APPDATA_PATH}/prowlarr:/config
     network_mode: "service:gluetun"
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
@@ -187,7 +267,7 @@ services:
       - WEBUI_PORT=8091
       - TORRENTING_PORT=6881
     volumes:
-      - ./appdata/qbittorrent/:/config
-      - ./media-drive/storage/:/storage
+      - ${APPDATA_PATH}/qbittorrent/:/config
+      - ${MEDIA_PATH}/storage/:/storage
     network_mode: "service:gluetun"
     restart: unless-stopped
